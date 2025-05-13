@@ -1,5 +1,6 @@
 import streamlit as st
 import re
+import requests
 
 st.title("ZPL Template Replacer")
 
@@ -52,9 +53,35 @@ if template_file and data_file:
         # Cho phép tải xuống
         st.download_button("Tải về ZPL đã thay", result, file_name="output.zpl", mime="text/plain")
 
-        # Hiển thị kết quả
+        # Hiển thị kết quả ZPL
         st.subheader("Kết quả sau khi thay thế:")
-        st.code(result, language="zpl")
+        st.code(result, language="zpl", height=200)
+
+        # Gọi hàm để lấy PDF từ API
+        def get_zpl_image(zpl):
+            url = 'http://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/'
+            files = {'file': zpl}
+            headers = {'Accept': 'application/pdf'}  # Bạn có thể đổi thành 'image/png' để nhận file PNG
+            response = requests.post(url, headers=headers, files=files, stream=True)
+
+            if response.status_code == 200:
+                return response.content  # Trả về nội dung PDF (hoặc PNG) của phản hồi
+            else:
+                st.error('Error: ' + response.text)
+                return None
+
+        # Gọi API để lấy PDF từ ZPL
+        pdf_data = get_zpl_image(result)
+
+        # Hiển thị PDF nếu có dữ liệu trả về
+        if pdf_data:
+            st.write("### Label PDF:")
+            st.download_button(
+                label="Download PDF",
+                data=pdf_data,
+                file_name="label.pdf",
+                mime="application/pdf"
+            )
 
     except Exception as e:
         st.error(f"Lỗi: {e}")
