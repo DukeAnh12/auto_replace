@@ -2,13 +2,18 @@ import streamlit as st
 import re
 import requests
 
-st.title("ZPL Template Replacer")
+st.title("🖨️ ZPL Template Replacer")
 
-# File upload
-template_file = st.file_uploader("Upload Template File", type=["txt", "zpl", "prn"])
-data_file = st.file_uploader("Upload Data File (containing ^FNx^FD...^FS)", type=["txt", "zpl", "prn"])
+# --- Helper Functions ---
+def read_uploaded_file(uploaded_file):
+    try:
+        content = uploaded_file.read().decode("utf-8")
+        return content
+    except Exception:
+        st.warning(f"Không đọc được nội dung của {uploaded_file.name}. Có thể không phải là file text.")
+        return None
 
-def extract_data_from_zpl_data(data_content):
+def extract_data_from_zpl(data_content):
     """Trích dữ liệu từ các dòng ^FNx^FD...^FS"""
     data_dict = {}
     pattern = r"\^FN(\d+)\^FD(.*?)\^FS"
@@ -20,68 +25,73 @@ def extract_data_from_zpl_data(data_content):
             data_dict[fn_key] = value
     return data_dict
 
-def replace_fn_in_template(template_content, data_dict):
-    """Thay ^FNx bằng ^FD<value> trong template"""
+def replace_fn_with_fd(template_content, data_dict):
+    """Thay ^FNx bằng ^FD<value>"""
     output_lines = []
+    template_type = ""
     for line in template_content.splitlines():
         if line == "^DFBOARDPASS^FS":
-            continue  # Bỏ qua dòng này
+            template_type = "^DFBOARDPASS^FS"
+            continue
+        elif line == "^DFBAGTAG^FS":
+            template_type = "^DFBAGTAG^FS"
+            continue
         match = re.search(r"\^FN(\d+)", line)
         if match:
             fn_key = f"FN{match.group(1)}"
-            if fn_key in data_dict:
-                value = data_dict[fn_key]
+            value = data_dict.get(fn_key)
+            if value:
                 replaced_line = re.sub(r"\^FN\d+", f"^FD{value}", line)
                 output_lines.append(replaced_line)
             else:
-                output_lines.append(line)  # giữ nguyên nếu không có dữ liệu
+                output_lines.append(line)
         else:
             output_lines.append(line)
-    return "\n".join(output_lines)
+    return "\n".join(output_lines), template_type
 
-# Khi cả hai file đều được tải lên
+def get_label_pdf(zpl_code, template_type):
+    if template_type == "^DFBAGTAG^FS":
+        url = 'http://api.labelary.com/v1/printers/8dpmm/labels/2x15/0/'
+    elif template_type == "^DFBOARDPASS^FS":
+        url = 'http://api.labelary.com/v1/printers/8dpmm/labels/3.5x7.5/0/'
+    else:
+        st.warning("Không xác định được template để gửi tới Labelary.")
+        return None
+
+    headers = {'Accept': 'application/pdf'}
+    files = {'file': zpl_code}
+    response = requests.post(url, headers=headers, files=files, stream=True)
+
+    if response.status_code == 200:
+        return response.content
+    else:
+        st.error("Labelary API Error: " + response.text)
+        return None
+
+# --- File Upload ---
+template_file = st.file_uploader("📄 Upload Template File", type=["txt", "zpl", "prn", "pdf"])
+data_file = st.file_uploader("📄 Upload Data File (chứa ^FNx^FD...^FS)", type=["txt", "zpl", "prn", "pdf"])
+
+# --- Main Processing ---
 if template_file and data_file:
-    try:
-        # Đọc nội dung file
-        template_content = template_file.read().decode("utf-8")
-        data_content = data_file.read().decode("utf-8")
+    template_content = read_uploaded_file(template_file)
+    data_content = read_uploaded_file(data_file)
 
-        # Parse data và thay thế
-        data_dict = extract_data_from_zpl_data(data_content)
-        result = replace_fn_in_template(template_content, data_dict)
-        
-        # Cho phép tải xuống
-        st.download_button("Tải về ZPL đã thay", result, file_name="output.zpl", mime="text/plain")
+    if template_content and data_content:
+        # Tự động hoán đổi nếu file bị ngược
+        if "^DFBOARDPASS^FS" in data_content or "^DFBAGTAG^FS" in data_content:
+            template_content, data_content = data_content, template_content
 
-        # Hiển thị kết quả ZPL
-        st.subheader("Kết quả sau khi thay thế:")
-        st.code(result, language="zpl", height=200)
+        data_dict = extract_data_from_zpl(data_content)
+        zpl_result, template_type = replace_fn_with_fd(template_content, data_dict)
 
-        # Gọi hàm để lấy PDF từ API
-        def get_zpl_image(zpl):
-            url = 'http://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/'
-            files = {'file': zpl}
-            headers = {'Accept': 'application/pdf'}  # Bạn có thể đổi thành 'image/png' để nhận file PNG
-            response = requests.post(url, headers=headers, files=files, stream=True)
+        # Hiển thị và cho phép tải về
+        st.subheader("🔧 Kết quả sau khi thay thế:")
+        st.code(zpl_result, language="zpl", height=200)
+        st.download_button("⬇️ Tải về ZPL đã thay", zpl_result, file_name="output.zpl", mime="text/plain")
 
-            if response.status_code == 200:
-                return response.content  # Trả về nội dung PDF (hoặc PNG) của phản hồi
-            else:
-                st.error('Error: ' + response.text)
-                return None
-
-        # Gọi API để lấy PDF từ ZPL
-        pdf_data = get_zpl_image(result)
-
-        # Hiển thị PDF nếu có dữ liệu trả về
-        if pdf_data:
-            st.write("### Label PDF:")
-            st.download_button(
-                label="Download PDF",
-                data=pdf_data,
-                file_name="label.pdf",
-                mime="application/pdf"
-            )
-
-    except Exception as e:
-        st.error(f"Lỗi: {e}")
+        # Gửi sang Labelary để tạo PDF
+        pdf_bytes = get_label_pdf(zpl_result, template_type)
+        if pdf_bytes:
+            st.write("📄 Xem hoặc tải nhãn PDF:")
+            st.download_button("⬇️ Tải PDF", data=pdf_bytes, file_name="label.pdf", mime="application/pdf")
