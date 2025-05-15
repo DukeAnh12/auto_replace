@@ -70,7 +70,7 @@ def get_label_pdf(zpl_code, template_type):
 
 # --- File Upload ---
 template_file = st.file_uploader("📄 Upload File", type=["txt", "zpl", "prn", "pdf"])
-data_file = st.file_uploader("📄 Upload File", type=["txt", "zpl", "prn", "pdf"])
+data_file = st.file_uploader("📄 Upload File.", type=["txt", "zpl", "prn", "pdf"])
 
 # --- Main Processing ---
 if template_file and data_file:
